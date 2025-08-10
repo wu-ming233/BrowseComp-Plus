@@ -165,7 +165,10 @@ Then, you can email this json file to `s42chen@uwaterloo.ca` to be added to the 
 
 ## Contact
 
-If you have any questions or suggestions, please contact us at `s42chen@uwaterloo.ca`.
+If you have any questions or suggestions, please contact us at:
+- Zijian Chen: [s42chen@uwaterloo.ca](mailto:s42chen@uwaterloo.ca)
+- Xueguang Ma: [x93ma@uwaterloo.ca](mailto:x93ma@uwaterloo.ca)
+- Shengyao Zhuang: [s.zhuang@uq.edu.au](mailto:s.zhuang@uq.edu.au)
 
 ## Citation
 
