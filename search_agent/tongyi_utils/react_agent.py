@@ -144,7 +144,8 @@ class MultiTurnReactAgent(FnCallAgent):
         # Resampling metrics
         total_resample_attempts = 0  # Total number of resampling attempts across all rounds
         # Per-tool-call alternatives in order of tool calls
-        tool_call_alternatives_seq: List[List[str]] = []
+        # Each alternative is a dict with 'seq' (string content) and 'overlap' (overlap metric with retrieved docs)
+        tool_call_alternatives_seq: List[List[Dict[str, Union[str, Optional[int]]]]] = []
 
         start_time = time.time()
         planning_port = data['planning_port']
@@ -179,7 +180,8 @@ class MultiTurnReactAgent(FnCallAgent):
             num_llm_calls_available -= 1
             
             # Resampling loop
-            current_round_alternatives: List[str] = []
+            # Each alternative is a dict with 'seq' (string content) and 'overlap' (overlap metric with retrieved docs)
+            current_round_alternatives: List[Dict[str, Union[str, Optional[int]]]] = []
             
             if self.always_resample is not None and self.always_resample > 0:
                 # always_resample mode - sample k candidates and pick least overlap
@@ -188,6 +190,7 @@ class MultiTurnReactAgent(FnCallAgent):
                 best_overlap = None
                 attempts_performed = 0
                 round_candidates: List[str] = []
+                candidate_overlap_map: Dict[str, Optional[int]] = {}  # Store overlap metric for each candidate
                 answer_found = False
 
                 for i in range(attempts_target):
@@ -202,6 +205,7 @@ class MultiTurnReactAgent(FnCallAgent):
                     if '<answer>' in content_candidate and '</answer>' in content_candidate:
                         answer_found = True
                         best_content = content_candidate
+                        candidate_overlap_map[content_candidate] = None
                         break
 
                     overlap_count_val = None
@@ -216,6 +220,9 @@ class MultiTurnReactAgent(FnCallAgent):
                                 overlap_count_val = len(set(potential_docids) & retrieved_docids)
                         except:
                             pass
+                    
+                    # Store overlap metric (None if no tool call or error)
+                    candidate_overlap_map[content_candidate] = overlap_count_val
 
                     overlap_metric = overlap_count_val if overlap_count_val is not None else float('inf')
                     if best_overlap is None or overlap_metric < best_overlap:
@@ -230,7 +237,21 @@ class MultiTurnReactAgent(FnCallAgent):
                 content = best_content if best_content is not None else content_candidate
                 resample_attempts_this_round = max(0, attempts_performed - 1)
                 total_resample_attempts += resample_attempts_this_round
-                current_round_alternatives = [c for c in round_candidates if c != content]
+                
+                # Process alternatives: reuse stored overlap metrics
+                current_round_alternatives = []
+                for alt_content in round_candidates:
+                    if alt_content == content:
+                        continue
+                    
+                    # Reuse stored overlap metric
+                    overlap_val = candidate_overlap_map.get(alt_content)
+                    overlap_metric = overlap_val if overlap_val is not None else None
+                    
+                    current_round_alternatives.append({
+                        'seq': alt_content,
+                        'overlap': overlap_metric
+                    })
                 
                 if self.verbose:
                     if answer_found:

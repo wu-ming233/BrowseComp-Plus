@@ -70,6 +70,12 @@ class FaissSearcher(BaseSearcher):
             default=8192,
             help="Maximum sequence length for FAISS search (default: 8192)",
         )
+        parser.add_argument(
+            "--faiss-cpu",
+            action="store_true",
+            default=False,
+            help="Force FAISS index to use CPU instead of GPU (default: False)",
+        )
 
     def __init__(self, args):
         if args.model_name == "bm25":
@@ -127,6 +133,10 @@ class FaissSearcher(BaseSearcher):
         self._setup_gpu()
 
     def _setup_gpu(self) -> None:
+        if self.args.faiss_cpu:
+            logger.info("--faiss-cpu flag set. Using CPU for FAISS index.")
+            return
+        
         num_gpus = faiss.get_num_gpus()
         if num_gpus == 0:
             logger.info("No GPU found or using faiss-cpu. Using CPU.")
@@ -170,6 +180,10 @@ class FaissSearcher(BaseSearcher):
         else:
             torch_dtype = torch.float32
 
+        attn_implementation = model_args.attn_implementation
+        if self.args.faiss_cpu or not torch.cuda.is_available():
+            attn_implementation = "eager"
+
         self.model = DenseModel.load(
             model_args.model_name_or_path,
             pooling=model_args.pooling,
@@ -177,10 +191,11 @@ class FaissSearcher(BaseSearcher):
             lora_name_or_path=model_args.lora_name_or_path,
             cache_dir=model_args.cache_dir,
             torch_dtype=torch_dtype,
-            attn_implementation=model_args.attn_implementation,
+            attn_implementation=attn_implementation,
         )
 
-        self.model = self.model.to("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = "cpu" if self.args.faiss_cpu else ("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = self.model.to(self.device)
         self.model.eval()
 
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -260,10 +275,9 @@ class FaissSearcher(BaseSearcher):
             return_tensors="pt",
         )
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        batch_dict = {k: v.to(device) for k, v in batch_dict.items()}
+        batch_dict = {k: v.to(self.device) for k, v in batch_dict.items()}
 
-        with torch.amp.autocast(device):
+        with torch.amp.autocast(self.device):
             with torch.no_grad():
                 q_reps = self.model.encode_query(batch_dict)
                 q_reps = q_reps.cpu().detach().numpy()
@@ -329,7 +343,8 @@ class ReasonIrSearcher(FaissSearcher):
             torch_dtype=torch_dtype,
             trust_remote_code=True,
         )
-        self.model = self.model.to("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = "cpu" if self.args.faiss_cpu else ("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = self.model.to(self.device)
         self.model.eval()
 
         logger.info("Model loaded successfully")
@@ -338,9 +353,7 @@ class ReasonIrSearcher(FaissSearcher):
         if not all([self.retriever, self.model, self.lookup]):
             raise RuntimeError("Searcher not properly initialized")
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        with torch.amp.autocast(device):
+        with torch.amp.autocast(self.device):
             with torch.no_grad():
                 q_reps = self.model.encode(
                     [query],
